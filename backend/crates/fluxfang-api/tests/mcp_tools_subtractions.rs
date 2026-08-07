@@ -166,3 +166,84 @@ async fn delete_emissions_where_all_clears_everything() {
     let (_, total) = EmissionRepo::query(&pool, fluxfang_db::repo::emission::EmissionFilter::default()).await.unwrap();
     assert_eq!(total, 0);
 }
+
+#[tokio::test]
+async fn unlink_emitters_refuses_a_verified_association_and_audits_error() {
+    use fluxfang_api::mcp::tools::ToolError;
+    use fluxfang_db::EmitterAssociationRepo;
+
+    let pool = fresh_pool().await;
+    let a = EmitterRepo::insert(&pool, NewEmitter { name: "A".into(), ..Default::default() })
+        .await
+        .unwrap()
+        .id;
+    let b = EmitterRepo::insert(&pool, NewEmitter { name: "B".into(), ..Default::default() })
+        .await
+        .unwrap()
+        .id;
+    // A manual link is verified (operator-confirmed).
+    EmitterAssociationRepo::add(&pool, a, b, "manual", None)
+        .await
+        .unwrap();
+
+    let err = subtractions::unlink_emitters(
+        &pool,
+        json!({ "emitter_id": a.to_string(), "associated_emitter_id": b.to_string() }),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ToolError::Forbidden(_)), "expected Forbidden, got {err:?}");
+
+    // The verified link must survive the refused delete.
+    assert_eq!(
+        EmitterAssociationRepo::list_for(&pool, a).await.unwrap().len(),
+        1,
+        "verified association must not be removed"
+    );
+}
+
+#[tokio::test]
+async fn delete_entity_refuses_a_verified_entity() {
+    use fluxfang_api::mcp::tools::ToolError;
+    use fluxfang_db::models::NewEntity;
+    use fluxfang_db::EntityRepo;
+
+    let pool = fresh_pool().await;
+    // A manual entity is verified.
+    let entity = EntityRepo::insert(
+        &pool,
+        NewEntity { name: "Confirmed".into(), source: "manual".into(), ..Default::default() },
+    )
+    .await
+    .unwrap();
+
+    let err = subtractions::delete_entity(&pool, json!({ "entity_id": entity.id.to_string() }))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ToolError::Forbidden(_)), "expected Forbidden, got {err:?}");
+
+    assert!(
+        EntityRepo::get(&pool, entity.id).await.unwrap().is_some(),
+        "verified entity must survive the refused delete"
+    );
+}
+
+#[tokio::test]
+async fn delete_entity_still_allows_an_ai_hypothesis_entity() {
+    use fluxfang_db::models::NewEntity;
+    use fluxfang_db::EntityRepo;
+
+    let pool = fresh_pool().await;
+    // An AI-made entity is only a hypothesis - the AI may retract its own.
+    let entity = EntityRepo::insert(
+        &pool,
+        NewEntity { name: "Guess".into(), source: "ai".into(), ..Default::default() },
+    )
+    .await
+    .unwrap();
+
+    subtractions::delete_entity(&pool, json!({ "entity_id": entity.id.to_string() }))
+        .await
+        .expect("deleting a hypothesis entity is allowed");
+    assert!(EntityRepo::get(&pool, entity.id).await.unwrap().is_none());
+}

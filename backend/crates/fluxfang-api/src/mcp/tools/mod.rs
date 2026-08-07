@@ -20,6 +20,7 @@ pub enum ToolError {
     Unknown(String),
     InvalidParams(String),
     NotFound(String),
+    Forbidden(String),
     Db(String),
 }
 
@@ -29,6 +30,7 @@ impl ToolError {
             ToolError::Unknown(m) => format!("unknown tool: {m}"),
             ToolError::InvalidParams(m) => format!("invalid params: {m}"),
             ToolError::NotFound(m) => format!("not found: {m}"),
+            ToolError::Forbidden(m) => format!("forbidden: {m}"),
             ToolError::Db(m) => format!("database error: {m}"),
         }
     }

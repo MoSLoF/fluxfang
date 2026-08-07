@@ -56,6 +56,13 @@ inside the insert/add methods means no `NewEntity`/`add()` call site changes.
   association now freezes the co-occurrence basis (geometry, timing, span,
   confidence) at decision time. A shared `initial_evidence_state` helper backs
   entity insert, association add, and this capture so the grading can't drift.
+- **Pillar 4 (verified-gate on the AI)**: AI writes already land at `hypothesis`
+  (the source-derived grading from pillar 1), so the AI cannot self-assert a
+  higher state. The destructive side is now gated too: the MCP `unlink_emitters`
+  and `delete_entity` tools refuse to remove a `verified` (operator-confirmed)
+  attribution, returning a `Forbidden` tool error the AI Audit Log records. This
+  is what neutralizes the "destructive, no-undo" authority - the AI can retract
+  its own guesses but cannot destroy confirmed truth.
 
 ### Frozen-snapshot rationale (0023)
 
@@ -71,9 +78,10 @@ this records *why it was believed*. Written once, never updated.
   `emitter.entity_id` attachment via the nullable column 0022 adds.
 - **Pillar 3**: RF-picture fingerprint + window diff (`core/rf_diff.rs`, an API
   route, a read-only `diff_rf_picture` MCP analysis tool).
-- **Pillar 4**: verified-gate - AI writes capped at `hypothesis` in `mcp/guard.rs`
-  + `mcp/tools/writes.rs`/`subtractions.rs`, and an evidence_state filter so only
-  `verified` attributions fire high-severity alerts.
+- **Pillar 4 (remaining)**: an operator promotion path (`hypothesis` ->
+  `verified`) via the API/UI (verified currently only arises from manual
+  creation), and an evidence_state filter on alert rules so only `verified`
+  attributions fire high-severity alerts.
 
 ## Review notes
 

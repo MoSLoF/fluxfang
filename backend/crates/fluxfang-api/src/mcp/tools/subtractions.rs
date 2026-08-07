@@ -120,6 +120,17 @@ pub async fn unassign_emitters_from_entity(pool: &PgPool, args: Value) -> Result
 pub async fn unlink_emitters(pool: &PgPool, args: Value) -> Result<Value, ToolError> {
     let a = shape::parse_uuid(&args, "emitter_id")?;
     let b = shape::parse_uuid(&args, "associated_emitter_id")?;
+    // Verified-gate (pillar 4): the AI must not destroy an operator-confirmed
+    // link. A human unverifies it first (via the API/UI, not this endpoint).
+    if EmitterAssociationRepo::get_evidence_state(pool, a, b)
+        .await?
+        .as_deref()
+        == Some("verified")
+    {
+        return Err(ToolError::Forbidden(format!(
+            "association {a} <-> {b} is verified (operator-confirmed); a human must unverify it before it can be unlinked"
+        )));
+    }
     EmitterAssociationRepo::remove(pool, a, b).await?;
     let result = json!({ "emitter_id": a, "associated_emitter_id": b });
     audit::record_success(
@@ -149,7 +160,14 @@ pub async fn delete_emitter(pool: &PgPool, args: Value) -> Result<Value, ToolErr
 
 pub async fn delete_entity(pool: &PgPool, args: Value) -> Result<Value, ToolError> {
     let id = shape::parse_uuid(&args, "entity_id")?;
-    let snapshot = EntityRepo::get(pool, id).await?
+    let existing = EntityRepo::get(pool, id).await?;
+    // Verified-gate (pillar 4): refuse to delete an operator-confirmed entity.
+    if existing.as_ref().map(|e| e.evidence_state.as_str()) == Some("verified") {
+        return Err(ToolError::Forbidden(format!(
+            "entity {id} is verified (operator-confirmed); a human must unverify it before it can be deleted"
+        )));
+    }
+    let snapshot = existing
         .map(|e| shape::entity_json(&e))
         .unwrap_or_else(|| json!({ "id": id }));
     let deleted = EntityRepo::delete(pool, id).await?;

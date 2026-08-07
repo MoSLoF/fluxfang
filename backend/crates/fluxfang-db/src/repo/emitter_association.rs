@@ -134,6 +134,26 @@ impl EmitterAssociationRepo {
             .collect())
     }
 
+    /// The graded `evidence_state` of the link in the given direction, or
+    /// `None` if no such link exists. Both stored directions carry the same
+    /// state, so either direction answers. Used by the MCP verified-gate to
+    /// refuse destroying operator-confirmed links.
+    pub async fn get_evidence_state(
+        pool: &PgPool,
+        emitter_id: Uuid,
+        associated_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT evidence_state FROM emitter_association \
+             WHERE emitter_id = $1 AND associated_emitter_id = $2",
+        )
+        .bind(emitter_id)
+        .bind(associated_id)
+        .fetch_optional(pool)
+        .await?;
+        Ok(row.map(|r| r.0))
+    }
+
     /// Whether a link (in the given direction — they're kept symmetric) exists.
     pub async fn exists(
         pool: &PgPool,
