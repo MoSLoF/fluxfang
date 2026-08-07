@@ -54,18 +54,10 @@ impl EmitterAssociationRepo {
         source: &str,
         confidence: Option<f64>,
     ) -> Result<(), sqlx::Error> {
-        // Initial certainty from provenance + strength (migration 0022): a
-        // manual link is `verified`, an AI link `hypothesis`, an auto link is
-        // graded by the correlation confidence - strong geographic separation
-        // (>= 0.8) is `observed`, a weaker time-only signal is `inferred`.
-        let evidence_state = match source {
-            "manual" => "verified",
-            "ai" => "hypothesis",
-            _ => match confidence {
-                Some(c) if c >= 0.8 => "observed",
-                _ => "inferred",
-            },
-        };
+        // Initial certainty from provenance + strength (migration 0022),
+        // shared with entity insert and attribution-evidence capture so the
+        // grading can never drift between them.
+        let evidence_state = crate::models::initial_evidence_state(source, confidence);
         let mut tx = pool.begin().await?;
         for (a, b) in [(emitter_id, associated_id), (associated_id, emitter_id)] {
             // manual: upgrade an existing row (and confirm it); auto: leave any

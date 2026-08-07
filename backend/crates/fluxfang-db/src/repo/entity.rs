@@ -50,15 +50,10 @@ impl Default for EntityListFilter {
 
 impl EntityRepo {
     pub async fn insert(pool: &PgPool, new: NewEntity) -> Result<Entity, sqlx::Error> {
-        // Initial certainty is derived from provenance (migration 0022): an
-        // operator-made entity is `verified`, an AI/MCP-made one is only
-        // `hypothesis` and must be confirmed before it can drive action.
-        // Deriving it here means no call site of `NewEntity` has to change.
-        let evidence_state = match new.source.as_str() {
-            "ai" => "hypothesis",
-            "auto" => "inferred",
-            _ => "verified", // 'manual'
-        };
+        // Initial certainty is derived from provenance (migration 0022) via
+        // the shared helper, so entity/association grading can't drift. No call
+        // site of `NewEntity` has to change.
+        let evidence_state = crate::models::initial_evidence_state(&new.source, new.ai_confidence);
         let sql = format!(
             "INSERT INTO entity (name, notes, source, ai_confidence, evidence_state) \
              VALUES ($1, $2, $3, $4, $5) \

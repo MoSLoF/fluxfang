@@ -567,3 +567,51 @@ pub struct NewCachedEmission {
     pub payload: serde_json::Value,
     pub data_source_id: Option<Uuid>,
 }
+
+/// The certainty an attribution starts at, derived from its provenance and
+/// (for `auto` links) its correlation strength. See migration
+/// `0022_evidence_state.sql`. Shared by entity insert, association add, and
+/// attribution-evidence capture so the grading can never drift between them.
+pub fn initial_evidence_state(source: &str, confidence: Option<f64>) -> &'static str {
+    match source {
+        "manual" => "verified",
+        "ai" => "hypothesis",
+        _ => match confidence {
+            Some(c) if c >= 0.8 => "observed",
+            _ => "inferred",
+        },
+    }
+}
+
+/// `attribution_evidence`: a frozen witness snapshot captured at the moment an
+/// attribution decision was made (migration `0023_attribution_evidence.sql`).
+/// Append-only and FK-free by design, so the justification for a decision
+/// outlives the emitter/entity it refers to - even after the AI deletes it.
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct AttributionEvidence {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    /// `emitter_association` | `emitter_entity` | `entity` - selects what the
+    /// two subject columns mean.
+    pub subject_kind: String,
+    pub subject_a: Uuid,
+    pub subject_b: Option<Uuid>,
+    pub asserted_by: String,
+    pub evidence_state: String,
+    pub confidence: Option<f64>,
+    pub witness: serde_json::Value,
+    pub complete: bool,
+}
+
+/// Fields to record a new [`AttributionEvidence`] snapshot. `complete` defaults
+/// to `true` in the DB and is not set here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewAttributionEvidence {
+    pub subject_kind: String,
+    pub subject_a: Uuid,
+    pub subject_b: Option<Uuid>,
+    pub asserted_by: String,
+    pub evidence_state: String,
+    pub confidence: Option<f64>,
+    pub witness: serde_json::Value,
+}

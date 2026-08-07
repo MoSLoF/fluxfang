@@ -50,6 +50,12 @@ inside the insert/add methods means no `NewEntity`/`add()` call site changes.
 - **Pillar 1**: `evidence_state` on the `Entity`/`AssociatedEmitter` models,
   derived-at-write in `EntityRepo::insert` + `EmitterAssociationRepo::add`,
   surfaced via `EntityDto`/`EmitterAssociationDto`.
+- **Pillar 2 (repo + auto-correlation capture)**: an `AttributionEvidence`
+  model + append-only `AttributionEvidenceRepo` (`record`/`list_for_subject`),
+  and witness capture in the TPMS auto-correlation pass - every `auto`
+  association now freezes the co-occurrence basis (geometry, timing, span,
+  confidence) at decision time. A shared `initial_evidence_state` helper backs
+  entity insert, association add, and this capture so the grading can't drift.
 
 ### Frozen-snapshot rationale (0023)
 
@@ -60,8 +66,9 @@ this records *why it was believed*. Written once, never updated.
 
 ## Follow-ups (not in this PR)
 
-- **Pillar 2**: `attribution_evidence` repo + witness capture on write; grade
-  the `emitter.entity_id` attachment via the nullable column 0022 adds.
+- **Pillar 2 (remaining)**: extend witness capture to the manual and AI/MCP
+  write paths (`mcp/tools/writes.rs`, `emitters.rs`), and grade the
+  `emitter.entity_id` attachment via the nullable column 0022 adds.
 - **Pillar 3**: RF-picture fingerprint + window diff (`core/rf_diff.rs`, an API
   route, a read-only `diff_rf_picture` MCP analysis tool).
 - **Pillar 4**: verified-gate - AI writes capped at `hypothesis` in `mcp/guard.rs`

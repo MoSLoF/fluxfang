@@ -19,7 +19,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use fluxfang_db::models::{NewDataSource, NewEmission, NewEmitter};
-use fluxfang_db::{DataSourceRepo, EmissionRepo, EmitterAssociationRepo, EmitterRepo, SessionRepo};
+use fluxfang_db::{
+    AttributionEvidenceRepo, DataSourceRepo, EmissionRepo, EmitterAssociationRepo, EmitterRepo,
+    SessionRepo,
+};
 
 mod common;
 use common::fresh_pool_shared;
@@ -163,6 +166,16 @@ async fn correlation_pass_links_two_sensors_seen_together_a_mile_apart() {
             .any(|ae| ae.emitter.id == a && ae.source == "auto"),
         "b should be auto-associated with a (bidirectional)"
     );
+
+    // Pillar 2: the auto-association froze a witness snapshot at decision time.
+    let witness = AttributionEvidenceRepo::list_for_subject(&pool, a, Some(b))
+        .await
+        .expect("list attribution_evidence");
+    assert_eq!(witness.len(), 1, "expected one witness snapshot for the pair");
+    assert_eq!(witness[0].subject_kind, "emitter_association");
+    assert_eq!(witness[0].asserted_by, "auto");
+    assert_eq!(witness[0].evidence_state, "observed"); // geographic, >= 1 mile
+    assert_eq!(witness[0].witness["basis"], "geographic");
 }
 
 #[tokio::test]

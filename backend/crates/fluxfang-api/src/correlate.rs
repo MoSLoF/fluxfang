@@ -7,10 +7,13 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use fluxfang_core::correlate::{cooccurrences, should_associate, CorrelationConfig, Reading};
-use fluxfang_db::models::Emitter;
+use fluxfang_core::correlate::{
+    cooccurrences, haversine_meters, should_associate, CoEvent, CorrelationConfig, Reading,
+};
+use fluxfang_db::models::{initial_evidence_state, Emitter, NewAttributionEvidence};
 use fluxfang_db::repo::emission::EmissionFilter;
-use fluxfang_db::{EmissionRepo, EmitterAssociationRepo, EmitterRepo};
+use fluxfang_db::{AttributionEvidenceRepo, EmissionRepo, EmitterAssociationRepo, EmitterRepo};
+use serde_json::json;
 use sqlx::PgPool;
 
 /// How far back to pull emissions when correlating.
@@ -62,6 +65,22 @@ pub async fn run_correlation_pass(pool: &PgPool, now: DateTime<Utc>) -> anyhow::
             let events = cooccurrences(ra, rb, cfg.cooccur_window);
             if let Some(confidence) = should_associate(&events, true, &cfg) {
                 EmitterAssociationRepo::add(pool, ea.id, eb.id, "auto", Some(confidence)).await?;
+                // Pillar 2: freeze the co-occurrence basis that justified this
+                // link, at decision time, so the "why" survives later mutation.
+                AttributionEvidenceRepo::record(
+                    pool,
+                    NewAttributionEvidence {
+                        subject_kind: "emitter_association".to_string(),
+                        subject_a: ea.id,
+                        subject_b: Some(eb.id),
+                        asserted_by: "auto".to_string(),
+                        evidence_state: initial_evidence_state("auto", Some(confidence))
+                            .to_string(),
+                        confidence: Some(confidence),
+                        witness: build_witness(&events, confidence, &cfg),
+                    },
+                )
+                .await?;
                 added += 1;
             }
         }
@@ -74,4 +93,50 @@ fn model_of(e: &Emitter) -> Option<String> {
         .get("model")
         .and_then(|v| v.as_str())
         .map(str::to_string)
+}
+
+/// Freeze the co-occurrence basis behind an auto-association into a witness
+/// JSON, captured at decision time (pillar 2). Bounded in size: at most 50
+/// events are inlined. `basis` mirrors `should_associate`'s two branches
+/// (geographic vs. time-only), and `max_separation_m` is the widest located
+/// pair - the geographic evidence for a >= 1 mile co-travel.
+fn build_witness(events: &[CoEvent], confidence: f64, cfg: &CorrelationConfig) -> serde_json::Value {
+    let basis = if confidence >= 0.8 {
+        "geographic"
+    } else {
+        "time_fallback"
+    };
+    let located: Vec<&CoEvent> = events
+        .iter()
+        .filter(|e| e.lon.is_some() && e.lat.is_some())
+        .collect();
+    let mut max_separation_m = 0.0f64;
+    for (i, e1) in located.iter().enumerate() {
+        for e2 in &located[i + 1..] {
+            let d = haversine_meters(
+                e1.lon.unwrap(),
+                e1.lat.unwrap(),
+                e2.lon.unwrap(),
+                e2.lat.unwrap(),
+            );
+            if d > max_separation_m {
+                max_separation_m = d;
+            }
+        }
+    }
+    let sample: Vec<serde_json::Value> = events
+        .iter()
+        .take(50)
+        .map(|e| json!({ "at": e.at, "lon": e.lon, "lat": e.lat }))
+        .collect();
+    json!({
+        "basis": basis,
+        "confidence": confidence,
+        "event_count": events.len(),
+        "located_event_count": located.len(),
+        "max_separation_m": max_separation_m,
+        "mile_meters_threshold": cfg.mile_meters,
+        "window": { "from": events.iter().map(|e| e.at).min(), "to": events.iter().map(|e| e.at).max() },
+        "events": sample,
+    })
 }
