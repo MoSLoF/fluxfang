@@ -236,6 +236,11 @@ pub struct Entity {
     pub notes: Option<String>,
     pub source: String,
     pub ai_confidence: Option<f64>,
+    /// Graded certainty of this entity (`hypothesis`|`inferred`|`observed`|
+    /// `verified`; see migration `0022_evidence_state.sql`). Derived from
+    /// `source` at insert time - operator-made is `verified`, AI-made is
+    /// `hypothesis` - and only `verified` should drive high-severity action.
+    pub evidence_state: String,
 }
 
 /// Fields required to create a new `entity`.
