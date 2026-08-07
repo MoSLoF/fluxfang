@@ -98,3 +98,39 @@ async fn exists_reflects_state() {
         .unwrap();
     assert!(EmitterAssociationRepo::exists(&pool, a, b).await.unwrap());
 }
+
+#[tokio::test]
+async fn evidence_state_is_graded_by_source_and_confidence() {
+    let pool = fresh_pool().await;
+    let a = mk_emitter(&pool, "a").await;
+    let b = mk_emitter(&pool, "b").await;
+    let c = mk_emitter(&pool, "c").await;
+    let d = mk_emitter(&pool, "d").await;
+
+    // auto + strong (geographic) confidence -> observed
+    EmitterAssociationRepo::add(&pool, a, b, "auto", Some(0.9))
+        .await
+        .unwrap();
+    assert_eq!(
+        EmitterAssociationRepo::list_for(&pool, a).await.unwrap()[0].evidence_state,
+        "observed"
+    );
+
+    // auto + weak (time-only) confidence -> inferred
+    EmitterAssociationRepo::add(&pool, c, d, "auto", Some(0.5))
+        .await
+        .unwrap();
+    assert_eq!(
+        EmitterAssociationRepo::list_for(&pool, c).await.unwrap()[0].evidence_state,
+        "inferred"
+    );
+
+    // manual -> verified, and it upgrades the existing auto row to verified
+    EmitterAssociationRepo::add(&pool, a, b, "manual", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        EmitterAssociationRepo::list_for(&pool, a).await.unwrap()[0].evidence_state,
+        "verified"
+    );
+}

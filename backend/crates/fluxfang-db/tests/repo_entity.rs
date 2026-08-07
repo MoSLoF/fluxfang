@@ -427,3 +427,29 @@ async fn delete_all_nulls_entity_id_on_survivors_emitters() {
     let reloaded = EmitterRepo::get(&pool, emitter.id).await.unwrap().unwrap();
     assert_eq!(reloaded.entity_id, None);
 }
+
+#[tokio::test]
+async fn entity_evidence_state_is_derived_from_source() {
+    let pool = fresh_pool().await;
+
+    let manual = EntityRepo::insert(
+        &pool,
+        NewEntity { name: "Op Car".into(), source: "manual".into(), ..Default::default() },
+    )
+    .await
+    .unwrap();
+    assert_eq!(manual.evidence_state, "verified");
+
+    let ai = EntityRepo::insert(
+        &pool,
+        NewEntity {
+            name: "AI Car".into(),
+            source: "ai".into(),
+            ai_confidence: Some(0.8),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(ai.evidence_state, "hypothesis");
+}
