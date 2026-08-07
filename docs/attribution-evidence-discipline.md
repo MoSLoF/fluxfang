@@ -63,6 +63,12 @@ inside the insert/add methods means no `NewEntity`/`add()` call site changes.
   attribution, returning a `Forbidden` tool error the AI Audit Log records. This
   is what neutralizes the "destructive, no-undo" authority - the AI can retract
   its own guesses but cannot destroy confirmed truth.
+- **Pillar 3 (RF-picture window diff)**: `EmissionRepo::window_emitter_summary`
+  (a non-truncating GROUP BY aggregate), a pure `diff_windows` over two windows
+  producing appeared / disappeared / persistent (with per-emitter count and
+  signal deltas), and a read-only `diff_rf_picture` MCP analysis tool - a
+  counter-surveillance primitive ("what changed in the RF picture between then
+  and now") safe for autonomous lanes. An HTTP/UI route is a follow-up.
 
 ### Frozen-snapshot rationale (0023)
 
@@ -76,8 +82,8 @@ this records *why it was believed*. Written once, never updated.
 - **Pillar 2 (remaining)**: extend witness capture to the manual and AI/MCP
   write paths (`mcp/tools/writes.rs`, `emitters.rs`), and grade the
   `emitter.entity_id` attachment via the nullable column 0022 adds.
-- **Pillar 3**: RF-picture fingerprint + window diff (`core/rf_diff.rs`, an API
-  route, a read-only `diff_rf_picture` MCP analysis tool).
+- **Pillar 3 (remaining)**: an HTTP API route + UI surface for the RF-picture
+  diff (the core diff and the read-only MCP tool are in this PR).
 - **Pillar 4 (remaining)**: an operator promotion path (`hypothesis` ->
   `verified`) via the API/UI (verified currently only arises from manual
   creation), and an evidence_state filter on alert rules so only `verified`

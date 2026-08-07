@@ -158,6 +158,14 @@ pub fn tool_list() -> Vec<ToolSchema> {
                 "min_distance_m":{"type":"number"},"min_time_s":{"type":"number"}}}),
         },
         ToolSchema {
+            name: "diff_rf_picture",
+            description: "Diff the RF picture between two time windows: which emitters appeared, went dark, or persisted (with deltas). Read-only.",
+            input_schema: json!({"type":"object","required":["baseline_from","baseline_to","compare_from","compare_to"],"properties":{
+                "baseline_from":{"type":"string"},"baseline_to":{"type":"string"},
+                "compare_from":{"type":"string"},"compare_to":{"type":"string"},
+                "kind":{"type":"string","description":"optional: wifi/bluetooth/tpms"}}}),
+        },
+        ToolSchema {
             name: "create_emitter_from_emissions",
             description: "Create a new AI-sourced emitter, optionally attaching explicit emission_ids and/or a match_rule (which retroactively claims all currently-matching emissions of the given kind).",
             input_schema: json!({"type":"object","required":["name"],"properties":{
@@ -370,6 +378,7 @@ async fn dispatch_inner(pool: &PgPool, name: &str, args: Value) -> Result<Value,
         "collocation_query" => analysis::collocation_query(pool, args).await,
         "suggest_associations" => analysis::suggest_associations(pool, args).await,
         "cotravel_analysis" => analysis::cotravel_analysis(pool, args).await,
+        "diff_rf_picture" => analysis::diff_rf_picture(pool, args).await,
         "create_emitter_from_emissions" => writes::create_emitter_from_emissions(pool, args).await,
         "set_emitter_match_rule" => writes::set_emitter_match_rule(pool, args).await,
         "preview_match_rule" => writes::preview_match_rule(pool, args).await,

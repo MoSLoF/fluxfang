@@ -44,7 +44,7 @@ pub use attribution_evidence::AttributionEvidenceRepo;
 pub use cached_emission::{CacheStats, CachedEmissionRepo};
 pub use cotravel::{CoTravelCandidate, CoTravelFilter, CoTravelRepo, IgnoredEmitter};
 pub use data_source::DataSourceRepo;
-pub use emission::EmissionRepo;
+pub use emission::{EmissionRepo, WindowEmitter};
 pub use emitter::{EmitterMatchRule, EmitterRepo};
 pub use emitter_association::{AssociatedEmitter, EmitterAssociationRepo};
 pub use entity::EntityRepo;
