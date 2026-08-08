@@ -69,7 +69,7 @@ const JOINED_EMITTER_COLUMNS: &str = "emitter.id, emitter.created_at, emitter.na
 
 /// Table-qualified [`Entity`] column list for [`ZoneRepo::subjects_in_zone`].
 const JOINED_ENTITY_COLUMNS: &str =
-    "entity.id, entity.created_at, entity.name, entity.notes, entity.source, entity.ai_confidence";
+    "entity.id, entity.created_at, entity.name, entity.notes, entity.source, entity.ai_confidence, entity.evidence_state";
 
 /// The subjects currently "in" a zone, per [`ZoneRepo::subjects_in_zone`]'s
 /// membership rule (see module docs).
