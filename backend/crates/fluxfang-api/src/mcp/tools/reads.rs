@@ -118,6 +118,7 @@ pub async fn get_emitter(pool: &PgPool, args: Value) -> Result<Value, ToolError>
         "associations": assocs.iter().map(|a| json!({
             "emitter": shape::emitter_json(&a.emitter),
             "source": a.source, "confidence": a.confidence,
+            "evidence_state": a.evidence_state,
         })).collect::<Vec<_>>(),
         "recent_emissions": recent.iter().map(shape::emission_json).collect::<Vec<_>>(),
     }))

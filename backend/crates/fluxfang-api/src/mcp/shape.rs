@@ -57,6 +57,9 @@ pub fn entity_json(e: &Entity) -> Value {
     json!({
         "id": e.id, "created_at": e.created_at, "name": e.name,
         "notes": e.notes, "source": e.source, "ai_confidence": e.ai_confidence,
+        // Graded certainty (migration 0022) - exposed so an MCP client can *see*
+        // the grade, not just be gated by it server-side.
+        "evidence_state": e.evidence_state,
     })
 }
 
