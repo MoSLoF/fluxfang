@@ -14,6 +14,9 @@ pub struct AssociatedEmitter {
     pub emitter: Emitter,
     pub source: String,
     pub confidence: Option<f64>,
+    /// Graded certainty of the link (migration 0022): `hypothesis`|`inferred`|
+    /// `observed`|`verified`.
+    pub evidence_state: String,
 }
 
 /// Row shape for `list_for`'s join: the joined emitter's columns flattened,
@@ -34,6 +37,7 @@ struct AssocRow {
     #[sqlx(rename = "assoc_source")]
     source: String,
     confidence: Option<f64>,
+    evidence_state: String,
 }
 
 pub struct EmitterAssociationRepo;
@@ -50,19 +54,23 @@ impl EmitterAssociationRepo {
         source: &str,
         confidence: Option<f64>,
     ) -> Result<(), sqlx::Error> {
+        // Initial certainty from provenance + strength (migration 0022),
+        // shared with entity insert and attribution-evidence capture so the
+        // grading can never drift between them.
+        let evidence_state = crate::models::initial_evidence_state(source, confidence);
         let mut tx = pool.begin().await?;
         for (a, b) in [(emitter_id, associated_id), (associated_id, emitter_id)] {
-            // manual: upgrade an existing row; auto: leave any existing row
-            // (manual OR auto) untouched.
+            // manual: upgrade an existing row (and confirm it); auto: leave any
+            // existing row (manual OR auto) untouched.
             let conflict = if source == "manual" {
-                "DO UPDATE SET source = 'manual', confidence = NULL"
+                "DO UPDATE SET source = 'manual', confidence = NULL, evidence_state = 'verified'"
             } else {
                 "DO NOTHING"
             };
             let sql = format!(
                 "INSERT INTO emitter_association \
-                 (emitter_id, associated_emitter_id, source, confidence) \
-                 VALUES ($1, $2, $3, $4) \
+                 (emitter_id, associated_emitter_id, source, confidence, evidence_state) \
+                 VALUES ($1, $2, $3, $4, $5) \
                  ON CONFLICT (emitter_id, associated_emitter_id) {conflict}"
             );
             sqlx::query(&sql)
@@ -70,6 +78,7 @@ impl EmitterAssociationRepo {
                 .bind(b)
                 .bind(source)
                 .bind(confidence)
+                .bind(evidence_state)
                 .execute(&mut *tx)
                 .await?;
         }
@@ -104,7 +113,7 @@ impl EmitterAssociationRepo {
         // est_location `ST_X(...)` unpacking that a blind `e.<col>` prefix can't).
         let cols = emitter_columns_qualified("e");
         let sql = format!(
-            "SELECT {cols}, ea.source AS assoc_source, ea.confidence \
+            "SELECT {cols}, ea.source AS assoc_source, ea.confidence, ea.evidence_state \
              FROM emitter_association ea \
              JOIN emitter e ON e.id = ea.associated_emitter_id \
              WHERE ea.emitter_id = $1 \
@@ -120,8 +129,29 @@ impl EmitterAssociationRepo {
                 emitter: r.emitter,
                 source: r.source,
                 confidence: r.confidence,
+                evidence_state: r.evidence_state,
             })
             .collect())
+    }
+
+    /// The graded `evidence_state` of the link in the given direction, or
+    /// `None` if no such link exists. Both stored directions carry the same
+    /// state, so either direction answers. Used by the MCP verified-gate to
+    /// refuse destroying operator-confirmed links.
+    pub async fn get_evidence_state(
+        pool: &PgPool,
+        emitter_id: Uuid,
+        associated_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT evidence_state FROM emitter_association \
+             WHERE emitter_id = $1 AND associated_emitter_id = $2",
+        )
+        .bind(emitter_id)
+        .bind(associated_id)
+        .fetch_optional(pool)
+        .await?;
+        Ok(row.map(|r| r.0))
     }
 
     /// Whether a link (in the given direction — they're kept symmetric) exists.

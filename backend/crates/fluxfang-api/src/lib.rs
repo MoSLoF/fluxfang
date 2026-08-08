@@ -49,6 +49,7 @@ pub mod catalog_routes;
 pub mod config_routes;
 pub mod correlate;
 pub mod cotravel;
+pub mod rf_diff;
 pub mod data_sources;
 pub mod dto;
 pub mod emissions;

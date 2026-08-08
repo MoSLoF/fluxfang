@@ -268,6 +268,7 @@ pub struct EmitterAssociationDto {
     pub emitter: EmitterDto,
     pub source: String,
     pub confidence: Option<f64>,
+    pub evidence_state: String,
 }
 
 impl From<&fluxfang_db::AssociatedEmitter> for EmitterAssociationDto {
@@ -276,6 +277,7 @@ impl From<&fluxfang_db::AssociatedEmitter> for EmitterAssociationDto {
             emitter: EmitterDto::from(&a.emitter),
             source: a.source.clone(),
             confidence: a.confidence,
+            evidence_state: a.evidence_state.clone(),
         }
     }
 }
@@ -310,6 +312,7 @@ pub struct EntityDto {
     pub name: String,
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub evidence_state: String,
 }
 
 impl From<&Entity> for EntityDto {
@@ -319,6 +322,7 @@ impl From<&Entity> for EntityDto {
             name: e.name.clone(),
             notes: e.notes.clone(),
             created_at: e.created_at,
+            evidence_state: e.evidence_state.clone(),
         }
     }
 }

@@ -24,7 +24,8 @@ pub struct EntityRepo;
 /// entity-insert half of its atomic entity+emitter transaction, same
 /// precedent as `repo::alert_rule` reusing `repo::alert_method`'s
 /// `ALERT_METHOD_COLUMNS`.
-pub(crate) const ENTITY_COLUMNS: &str = "id, created_at, name, notes, source, ai_confidence";
+pub(crate) const ENTITY_COLUMNS: &str =
+    "id, created_at, name, notes, source, ai_confidence, evidence_state";
 
 /// Filter/paginate criteria for [`EntityRepo::query`] (Phase 1b). `search`,
 /// when `Some`, is a case-insensitive substring matched across `name` and
@@ -49,9 +50,13 @@ impl Default for EntityListFilter {
 
 impl EntityRepo {
     pub async fn insert(pool: &PgPool, new: NewEntity) -> Result<Entity, sqlx::Error> {
+        // Initial certainty is derived from provenance (migration 0022) via
+        // the shared helper, so entity/association grading can't drift. No call
+        // site of `NewEntity` has to change.
+        let evidence_state = crate::models::initial_evidence_state(&new.source, new.ai_confidence);
         let sql = format!(
-            "INSERT INTO entity (name, notes, source, ai_confidence) \
-             VALUES ($1, $2, $3, $4) \
+            "INSERT INTO entity (name, notes, source, ai_confidence, evidence_state) \
+             VALUES ($1, $2, $3, $4, $5) \
              RETURNING {ENTITY_COLUMNS}"
         );
         sqlx::query_as::<_, Entity>(&sql)
@@ -59,6 +64,7 @@ impl EntityRepo {
             .bind(new.notes)
             .bind(new.source)
             .bind(new.ai_confidence)
+            .bind(evidence_state)
             .fetch_one(pool)
             .await
     }

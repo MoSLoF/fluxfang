@@ -765,3 +765,50 @@ pub struct DeleteEmissionFilter {
     /// attached; `None` = no constraint.
     pub unassigned: Option<bool>,
 }
+
+/// Per-emitter summary of everything observed in a time window - the "RF
+/// picture" of that window (pillar 3, RF-diff). Aggregated in SQL (no limit
+/// truncation) and joined to the emitter for identity.
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
+pub struct WindowEmitter {
+    pub emitter_id: uuid::Uuid,
+    pub name: String,
+    pub emitter_type: Option<String>,
+    pub emission_count: i64,
+    pub first_seen: chrono::DateTime<chrono::Utc>,
+    pub last_seen: chrono::DateTime<chrono::Utc>,
+    pub min_dbm: Option<i32>,
+    pub max_dbm: Option<i32>,
+    pub avg_dbm: Option<f64>,
+}
+
+impl EmissionRepo {
+    /// Summarize every emitter observed in `[from, to)`, optionally narrowed to
+    /// one emission `kind` (e.g. "wifi"|"bluetooth"|"tpms"). Powers the
+    /// RF-picture window diff; unassigned (stray) emissions are excluded.
+    pub async fn window_emitter_summary(
+        pool: &sqlx::PgPool,
+        from: chrono::DateTime<chrono::Utc>,
+        to: chrono::DateTime<chrono::Utc>,
+        kind: Option<&str>,
+    ) -> Result<Vec<WindowEmitter>, sqlx::Error> {
+        let kind_clause = if kind.is_some() { "AND em.kind = $3" } else { "" };
+        let sql = format!(
+            "SELECT em.emitter_id AS emitter_id, e.name AS name, \
+                    e.emitter_type AS emitter_type, count(*) AS emission_count, \
+                    min(em.observed_at) AS first_seen, max(em.observed_at) AS last_seen, \
+                    min(em.signal_strength) AS min_dbm, max(em.signal_strength) AS max_dbm, \
+                    avg(em.signal_strength)::double precision AS avg_dbm \
+             FROM emission em JOIN emitter e ON e.id = em.emitter_id \
+             WHERE em.emitter_id IS NOT NULL \
+               AND em.observed_at >= $1 AND em.observed_at < $2 {kind_clause} \
+             GROUP BY em.emitter_id, e.name, e.emitter_type \
+             ORDER BY e.name"
+        );
+        let mut q = sqlx::query_as::<_, WindowEmitter>(&sql).bind(from).bind(to);
+        if let Some(k) = kind {
+            q = q.bind(k);
+        }
+        q.fetch_all(pool).await
+    }
+}

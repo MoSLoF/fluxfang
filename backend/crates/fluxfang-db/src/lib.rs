@@ -15,9 +15,9 @@ pub mod sort;
 pub use models::{CachedEmission, NewCachedEmission, NewDataSource, Sensor};
 pub use node_config::{NodeConfig, NodeRole, SensorConfig};
 pub use repo::{
-    AiAuditRepo, AlertMethodRepo, AlertRuleRepo, AppConfigRepo, AssociatedEmitter, CacheStats,
+    AiAuditRepo, AlertMethodRepo, AlertRuleRepo, AppConfigRepo, AssociatedEmitter, AttributionEvidenceRepo, CacheStats,
     CachedEmissionRepo, CoTravelRepo, DataSourceRepo, EmissionRepo, EmitterAssociationRepo,
-    EmitterMatchRule, EmitterRepo, EntityRepo, IgnoredEmitter, LocationRepo, NotificationRepo,
+    EmitterMatchRule, EmitterRepo, WindowEmitter, EntityRepo, IgnoredEmitter, LocationRepo, NotificationRepo,
     SensorRepo, SessionRepo, ZoneMembershipRepo, ZoneRepo,
 };
 pub use sort::resolve_order_by;

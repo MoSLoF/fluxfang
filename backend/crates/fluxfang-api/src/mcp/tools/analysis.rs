@@ -112,3 +112,28 @@ pub async fn cotravel_analysis(pool: &PgPool, args: Value) -> Result<Value, Tool
         .collect();
     Ok(json!({ "candidates": scored }))
 }
+
+/// Diff the RF picture between two time windows: which emitters appeared, went
+/// dark, or persisted (with per-emitter deltas). Read-only (pillar 3).
+pub async fn diff_rf_picture(pool: &PgPool, args: Value) -> Result<Value, ToolError> {
+    let baseline_from = shape::opt_time(&args, "baseline_from")?
+        .ok_or_else(|| ToolError::InvalidParams("baseline_from (RFC3339) is required".into()))?;
+    let baseline_to = shape::opt_time(&args, "baseline_to")?
+        .ok_or_else(|| ToolError::InvalidParams("baseline_to (RFC3339) is required".into()))?;
+    let compare_from = shape::opt_time(&args, "compare_from")?
+        .ok_or_else(|| ToolError::InvalidParams("compare_from (RFC3339) is required".into()))?;
+    let compare_to = shape::opt_time(&args, "compare_to")?
+        .ok_or_else(|| ToolError::InvalidParams("compare_to (RFC3339) is required".into()))?;
+    let kind = shape::opt_str(&args, "kind");
+    let diff = crate::rf_diff::run_rf_diff(
+        pool,
+        baseline_from,
+        baseline_to,
+        compare_from,
+        compare_to,
+        kind.as_deref(),
+    )
+    .await
+    .map_err(|e| ToolError::Db(format!("{e:?}")))?;
+    serde_json::to_value(&diff).map_err(|e| ToolError::Db(format!("serialize rf diff: {e}")))
+}
