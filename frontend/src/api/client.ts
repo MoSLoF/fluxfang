@@ -103,6 +103,7 @@ export function del<T>(path: string): Promise<T> {
 /** `GET /api/setup/status` response shape. */
 export interface SetupStatus {
   needs_setup: boolean;
+  requires_token: boolean;
 }
 
 export type NodeRole = 'standalone' | 'sensor';
@@ -136,6 +137,7 @@ export interface SetupRequest {
   role: NodeRole;
   node_sensor_id: string;
   sensor?: SensorSetup;
+  bootstrap_token?: string;
 }
 
 /** `GET /api/sensor/status` response shape — a Sensor node's own forwarding

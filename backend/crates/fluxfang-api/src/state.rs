@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sqlx::PgPool;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Semaphore};
 
 use crate::capture::{CaptureSupervisor, CapturerFactory, RealCapturerFactory};
 use crate::ingest::Event;
@@ -88,6 +88,11 @@ fn prune(failures: &mut VecDeque<Instant>) {
 /// loaded from `FLUXFANG_SECRET_KEY` via `fluxfang_core::secrets::key_from_base64`.
 const PLACEHOLDER_SECRET_KEY: [u8; 32] = [0u8; 32];
 
+/// Maximum concurrent Argon2 hashing operations (setup + login combined).
+/// Keeps a burst of unauthenticated requests from saturating the blocking
+/// thread pool and starving capture/ingest.
+const HASH_CONCURRENCY: usize = 2;
+
 /// Capacity of [`AppState`]'s `ingest::Event` broadcast channel (Task 7.1's
 /// WebSocket handler is the eventual real subscriber). Sized generously
 /// relative to this single-admin app's expected emission rate; a slow or
@@ -125,6 +130,16 @@ pub struct AppState {
     /// on a Standalone, which never spawns a forwarder — that keeps
     /// `AppState` role-independent rather than making the field optional.
     pub forwarder_health: Arc<crate::forwarder::ForwarderHealth>,
+    /// One-time bootstrap token required for first-run `POST /api/setup`.
+    /// `None` when setup was already completed at startup (the setup route
+    /// already returns 409 via the atomic DB check, so the token is
+    /// defense-in-depth) or when running tests that don't exercise the
+    /// token path. Set at startup in `main.rs` from
+    /// `FLUXFANG_BOOTSTRAP_TOKEN` or auto-generated and printed to console.
+    pub bootstrap_token: Option<String>,
+    /// Caps concurrent Argon2 hashing across setup + login to prevent a
+    /// burst of unauthenticated requests from saturating the blocking pool.
+    pub hash_semaphore: Arc<Semaphore>,
 }
 
 impl AppState {
@@ -204,6 +219,14 @@ impl AppState {
             sensor_listeners,
             secret_key,
             forwarder_health: Arc::new(crate::forwarder::ForwarderHealth::default()),
+            bootstrap_token: None,
+            hash_semaphore: Arc::new(Semaphore::new(HASH_CONCURRENCY)),
         }
+    }
+
+    /// Set the bootstrap token required for first-run setup. Called from
+    /// `main.rs` after the token is generated or read from the environment.
+    pub fn set_bootstrap_token(&mut self, token: String) {
+        self.bootstrap_token = Some(token);
     }
 }

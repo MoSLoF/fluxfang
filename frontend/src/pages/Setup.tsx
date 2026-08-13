@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, ApiError } from '../api/client';
 import type { NodeRole } from '../api/client';
@@ -23,8 +23,14 @@ export default function Setup({ onSetupComplete }: SetupProps) {
   const [host, setHost] = useState('');
   const [port, setPort] = useState('9000');
   const [key, setKey] = useState('');
+  const [bootstrapToken, setBootstrapToken] = useState('');
+  const [requiresToken, setRequiresToken] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api.setupStatus().then((s) => setRequiresToken(s.requires_token)).catch(() => {});
+  }, []);
 
   // When switching to Sensor, clear the standalone default id so the operator
   // must name the sensor; switching back restores 'local'.
@@ -66,22 +72,30 @@ export default function Setup({ onSetupComplete }: SetupProps) {
       }
     }
 
+    if (requiresToken && bootstrapToken.trim().length === 0) {
+      setError('Paste the bootstrap token from the server console.');
+      return;
+    }
+
     setSubmitting(true);
     try {
+      const base = role === 'sensor'
+        ? {
+            password,
+            role,
+            node_sensor_id: nodeId,
+            sensor: { host: host.trim(), port: portNum, key, cache_ttl_secs: DEFAULT_TTL_SECS },
+          }
+        : { password, role, node_sensor_id: nodeId };
       await api.setup(
-        role === 'sensor'
-          ? {
-              password,
-              role,
-              node_sensor_id: nodeId,
-              sensor: { host: host.trim(), port: portNum, key, cache_ttl_secs: DEFAULT_TTL_SECS },
-            }
-          : { password, role, node_sensor_id: nodeId },
+        requiresToken ? { ...base, bootstrap_token: bootstrapToken.trim() } : base,
       );
       await onSetupComplete();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError('Setup has already been completed.');
+      } else if (err instanceof ApiError && err.status === 403) {
+        setError('Invalid bootstrap token. Check the server console for the correct token.');
       } else {
         setError('Setup failed. Try again.');
       }
@@ -104,6 +118,16 @@ export default function Setup({ onSetupComplete }: SetupProps) {
           <h1 className="font-mono text-lg font-semibold text-amber-400">FluxFang</h1>
           <p className="mt-1 text-sm text-slate-400">Set an admin password and choose this node&apos;s role.</p>
         </div>
+
+        {requiresToken && (
+          <div className="space-y-1">
+            <label htmlFor="setup-token" className={labelClass}>Bootstrap token</label>
+            <input id="setup-token" type="text" autoComplete="off" value={bootstrapToken}
+              onChange={(e) => setBootstrapToken(e.target.value)} className={inputClass}
+              placeholder="Paste from server console" />
+            <p className="text-xs text-slate-500">Printed to the server console on first startup.</p>
+          </div>
+        )}
 
         <fieldset className="space-y-2">
           <legend className={labelClass}>Node role</legend>

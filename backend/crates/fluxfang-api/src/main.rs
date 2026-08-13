@@ -44,13 +44,45 @@ async fn main() {
         Some(fluxfang_db::NodeRole::Sensor)
     );
 
-    let state = AppState::with_capture(
+    let mut state = AppState::with_capture(
         pool.clone(),
         secret_key,
         Arc::new(RealCapturerFactory),
         node_sensor_id.clone(),
         is_sensor,
     );
+
+    // FF-001: bootstrap token for first-run setup. When setup hasn't been
+    // completed yet, require a one-time token so a network neighbor can't
+    // race to claim admin on a fresh instance. The token is read from
+    // FLUXFANG_BOOTSTRAP_TOKEN if set, otherwise auto-generated. Either
+    // way it's printed to the local console — the only place the operator
+    // can retrieve it.
+    if node.is_none() {
+        let needs_setup = fluxfang_db::AppConfigRepo::password_hash(&pool)
+            .await
+            .ok()
+            .flatten()
+            .is_none();
+        if needs_setup {
+            let token = std::env::var("FLUXFANG_BOOTSTRAP_TOKEN")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+            eprintln!();
+            eprintln!("╔══════════════════════════════════════════════════════════════╗");
+            eprintln!("║  BOOTSTRAP TOKEN (required to complete first-run setup)     ║");
+            eprintln!("║                                                             ║");
+            eprintln!("║  {token:<57}║");
+            eprintln!("║                                                             ║");
+            eprintln!("║  Paste this into the Setup page or include it in the        ║");
+            eprintln!("║  POST /api/setup request body as \"bootstrap_token\".          ║");
+            eprintln!("║  This token is single-use and will not be shown again.      ║");
+            eprintln!("╚══════════════════════════════════════════════════════════════╝");
+            eprintln!();
+            state.set_bootstrap_token(token);
+        }
+    }
 
     // Start the supervisor's background tasks (the device-failure drain) before
     // resuming, so a source that dies during/after resume is reconciled.

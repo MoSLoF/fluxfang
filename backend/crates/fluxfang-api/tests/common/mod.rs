@@ -155,6 +155,14 @@ pub async fn test_app() -> Router {
     app(AppState::new(fresh_pool().await))
 }
 
+/// Same as [`test_app`], but with a bootstrap token configured — tests that
+/// exercise the FF-001 bootstrap token enforcement need this.
+pub async fn test_app_with_bootstrap_token(token: &str) -> Router {
+    let mut state = AppState::new(fresh_pool().await);
+    state.set_bootstrap_token(token.to_string());
+    app(state)
+}
+
 /// Same as [`test_app`], but with a caller-supplied `CapturerFactory` (e.g.
 /// `fluxfang_api::capture::MockCapturerFactory`) wired into the
 /// `CaptureSupervisor` instead of the real, hardware-touching one --

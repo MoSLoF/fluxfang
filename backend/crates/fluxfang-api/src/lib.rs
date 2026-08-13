@@ -129,16 +129,19 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Build the `tower-sessions` cookie-session layer. See module docs for the
-/// store choice; cookie attributes here follow the brief: http-only,
-/// same-site Lax, and a `secure` flag controlled by `FLUXFANG_SESSION_SECURE`
-/// (default `false` — nothing in this stack terminates TLS yet, see
-/// `frontend/nginx.conf`; set to `true` once it does, since browsers silently
-/// drop `Secure` cookies sent over plain HTTP).
+/// Build the `tower-sessions` cookie-session layer. Session cookies are
+/// http-only, same-site Lax, and `Secure` **by default** (FF-002). The
+/// `Secure` flag is dropped only when `FLUXFANG_INSECURE_DEV=true` is
+/// explicitly set — intended for local development without TLS, never for
+/// deployment. Browsers silently drop `Secure` cookies sent over plain
+/// HTTP, so running without TLS while `Secure` is on simply makes sessions
+/// inoperable, which is a loud failure mode rather than a silent security
+/// gap.
 fn session_layer() -> SessionManagerLayer<MemoryStore> {
-    let secure = std::env::var("FLUXFANG_SESSION_SECURE")
+    let insecure_dev = std::env::var("FLUXFANG_INSECURE_DEV")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
+    let secure = !insecure_dev;
 
     SessionManagerLayer::new(MemoryStore::default())
         .with_http_only(true)

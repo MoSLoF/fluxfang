@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 mod common;
 use common::{
     assert_status, body_json, get, get_with_cookie, post_json, post_json_with_cookie,
-    session_cookie, test_app,
+    session_cookie, test_app, test_app_with_bootstrap_token,
 };
 
 async fn needs_setup(app: &axum::Router) -> bool {
@@ -280,4 +280,92 @@ async fn setup_rejects_non_slug_node_id() {
     let body = r#"{"password":"pw123456","role":"standalone","node_sensor_id":"front gate"}"#;
     let resp = post_json(&app, "/api/setup", body).await;
     assert_status(&resp, StatusCode::BAD_REQUEST);
+}
+
+// --- FF-001: bootstrap token enforcement ---
+
+/// Setup without a bootstrap token is rejected with 403 when the server
+/// was started with a token configured.
+#[tokio::test]
+async fn setup_without_bootstrap_token_is_403() {
+    let app = test_app_with_bootstrap_token("test-secret-token").await;
+
+    let resp = post_json(&app, "/api/setup", r#"{"password":"pw123456"}"#).await;
+    assert_status(&resp, StatusCode::FORBIDDEN);
+
+    // Setup should still be needed.
+    let resp = get(&app, "/api/setup/status").await;
+    let json = body_json(resp).await;
+    assert!(json["needs_setup"].as_bool().unwrap());
+    assert!(json["requires_token"].as_bool().unwrap());
+}
+
+/// Setup with the wrong bootstrap token is rejected.
+#[tokio::test]
+async fn setup_with_wrong_bootstrap_token_is_403() {
+    let app = test_app_with_bootstrap_token("correct-token").await;
+
+    let resp = post_json(
+        &app,
+        "/api/setup",
+        r#"{"password":"pw123456","bootstrap_token":"wrong-token"}"#,
+    )
+    .await;
+    assert_status(&resp, StatusCode::FORBIDDEN);
+}
+
+/// Setup with the correct bootstrap token succeeds.
+#[tokio::test]
+async fn setup_with_correct_bootstrap_token_succeeds() {
+    let app = test_app_with_bootstrap_token("correct-token").await;
+
+    let resp = post_json(
+        &app,
+        "/api/setup",
+        r#"{"password":"pw123456","bootstrap_token":"correct-token"}"#,
+    )
+    .await;
+    assert_status(&resp, StatusCode::OK);
+
+    // After setup, requires_token should be false (setup is done).
+    let resp = get(&app, "/api/setup/status").await;
+    let json = body_json(resp).await;
+    assert!(!json["needs_setup"].as_bool().unwrap());
+    assert!(!json["requires_token"].as_bool().unwrap());
+}
+
+// --- FF-003: cheap pre-check ---
+
+/// After setup is complete, further setup attempts return 409 without
+/// performing Argon2 work (the cheap pre-check).
+#[tokio::test]
+async fn setup_after_completion_returns_409_immediately() {
+    let app = test_app().await;
+
+    let resp = post_json(&app, "/api/setup", r#"{"password":"pw123456"}"#).await;
+    assert_status(&resp, StatusCode::OK);
+
+    // Second attempt should be rejected cheaply (409) regardless of password.
+    let resp = post_json(&app, "/api/setup", r#"{"password":"different1"}"#).await;
+    assert_status(&resp, StatusCode::CONFLICT);
+
+    // Original password still works.
+    let resp = post_json(&app, "/api/login", r#"{"password":"pw123456"}"#).await;
+    assert_status(&resp, StatusCode::OK);
+}
+
+/// Login rejects passwords exceeding the maximum length before hashing.
+#[tokio::test]
+async fn login_rejects_absurdly_long_password() {
+    let app = test_app().await;
+    post_json(&app, "/api/setup", r#"{"password":"pw123456"}"#).await;
+
+    let too_long = "a".repeat(1025);
+    let resp = post_json(
+        &app,
+        "/api/login",
+        &format!(r#"{{"password":"{too_long}"}}"#),
+    )
+    .await;
+    assert_status(&resp, StatusCode::UNAUTHORIZED);
 }
