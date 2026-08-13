@@ -23,14 +23,14 @@ test('defaults to Standalone and posts role + default node id', async () => {
 
   await waitFor(() => {
     const setupCalls = fetchMock.mock.calls.filter(
-      ([url]: [string]) => new URL(url, 'http://localhost').pathname === '/api/setup',
+      ([url]) => new URL(String(url), 'http://localhost').pathname === '/api/setup',
     );
     expect(setupCalls.length).toBe(1);
   });
   const setupCall = fetchMock.mock.calls.find(
-    ([url]: [string]) => new URL(url, 'http://localhost').pathname === '/api/setup',
+    ([url]) => new URL(String(url), 'http://localhost').pathname === '/api/setup',
   );
-  const body = JSON.parse((setupCall![1] as RequestInit).body as string);
+  const body = JSON.parse(setupCall![1]!.body as string);
   expect(body.role).toBe('standalone');
   expect(body.node_sensor_id).toBe('local');
   expect(body.sensor).toBeUndefined();
@@ -54,14 +54,14 @@ test('choosing Sensor reveals connection fields and posts them', async () => {
 
   await waitFor(() => {
     const setupCalls = fetchMock.mock.calls.filter(
-      ([url]: [string]) => new URL(url, 'http://localhost').pathname === '/api/setup',
+      ([url]) => new URL(String(url), 'http://localhost').pathname === '/api/setup',
     );
     expect(setupCalls.length).toBe(1);
   });
   const setupCall = fetchMock.mock.calls.find(
-    ([url]: [string]) => new URL(url, 'http://localhost').pathname === '/api/setup',
+    ([url]) => new URL(String(url), 'http://localhost').pathname === '/api/setup',
   );
-  const body = JSON.parse((setupCall![1] as RequestInit).body as string);
+  const body = JSON.parse(setupCall![1]!.body as string);
   expect(body.role).toBe('sensor');
   expect(body.node_sensor_id).toBe('frontgate');
   expect(body.sensor).toMatchObject({ host: 'base.example', port: 9000, key: 'a2V5' });
@@ -90,7 +90,7 @@ test('rejects a sensor id containing a space', async () => {
 
   expect(await screen.findByRole('alert')).toHaveTextContent(/id/i);
   const setupCalls = fetchMock.mock.calls.filter(
-    ([url]: [string]) => new URL(url, 'http://localhost').pathname === '/api/setup',
+    ([url]) => new URL(String(url), 'http://localhost').pathname === '/api/setup',
   );
   expect(setupCalls.length).toBe(0);
 });
@@ -115,14 +115,14 @@ test('includes bootstrap_token in setup request when required', async () => {
 
   await waitFor(() => {
     const setupCalls = fetchMock.mock.calls.filter(
-      ([url]: [string]) => new URL(url, 'http://localhost').pathname === '/api/setup',
+      ([url]) => new URL(String(url), 'http://localhost').pathname === '/api/setup',
     );
     expect(setupCalls.length).toBe(1);
   });
   const setupCall = fetchMock.mock.calls.find(
-    ([url]: [string]) => new URL(url, 'http://localhost').pathname === '/api/setup',
+    ([url]) => new URL(String(url), 'http://localhost').pathname === '/api/setup',
   );
-  const body = JSON.parse((setupCall![1] as RequestInit).body as string);
+  const body = JSON.parse(setupCall![1]!.body as string);
   expect(body.bootstrap_token).toBe('test-token-123');
 });
 

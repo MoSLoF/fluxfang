@@ -136,7 +136,10 @@ pub struct AppState {
     /// defense-in-depth) or when running tests that don't exercise the
     /// token path. Set at startup in `main.rs` from
     /// `FLUXFANG_BOOTSTRAP_TOKEN` or auto-generated and printed to console.
-    pub bootstrap_token: Option<String>,
+    /// Wrapped in `Arc<Mutex<>>` so the token can be cleared after
+    /// successful setup (defense-in-depth: the token no longer sits in
+    /// memory once it's been used).
+    pub bootstrap_token: Arc<Mutex<Option<String>>>,
     /// Caps concurrent Argon2 hashing across setup + login to prevent a
     /// burst of unauthenticated requests from saturating the blocking pool.
     pub hash_semaphore: Arc<Semaphore>,
@@ -219,7 +222,7 @@ impl AppState {
             sensor_listeners,
             secret_key,
             forwarder_health: Arc::new(crate::forwarder::ForwarderHealth::default()),
-            bootstrap_token: None,
+            bootstrap_token: Arc::new(Mutex::new(None)),
             hash_semaphore: Arc::new(Semaphore::new(HASH_CONCURRENCY)),
         }
     }
@@ -227,6 +230,18 @@ impl AppState {
     /// Set the bootstrap token required for first-run setup. Called from
     /// `main.rs` after the token is generated or read from the environment.
     pub fn set_bootstrap_token(&mut self, token: String) {
-        self.bootstrap_token = Some(token);
+        *self
+            .bootstrap_token
+            .lock()
+            .expect("bootstrap_token mutex poisoned") = Some(token);
+    }
+
+    /// Clear the bootstrap token after successful setup. Defense-in-depth:
+    /// the token no longer sits in memory once it's been used.
+    pub fn clear_bootstrap_token(&self) {
+        *self
+            .bootstrap_token
+            .lock()
+            .expect("bootstrap_token mutex poisoned") = None;
     }
 }

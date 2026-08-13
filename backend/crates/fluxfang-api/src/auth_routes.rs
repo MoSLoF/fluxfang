@@ -24,6 +24,7 @@ use tower_sessions::Session;
 use fluxfang_core::auth::{hash_password, verify_password};
 use fluxfang_db::node_config::{NodeConfig, NodeRole, SensorConfig};
 use fluxfang_db::AppConfigRepo;
+use subtle::ConstantTimeEq;
 
 use crate::middleware::SESSION_AUTH_KEY;
 use crate::state::AppState;
@@ -86,9 +87,14 @@ pub fn protected_routes() -> Router<AppState> {
 async fn setup_status(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     let hash = AppConfigRepo::password_hash(&state.pool).await?;
     let needs_setup = hash.is_none();
+    let has_token = state
+        .bootstrap_token
+        .lock()
+        .expect("bootstrap_token mutex poisoned")
+        .is_some();
     Ok(Json(json!({
         "needs_setup": needs_setup,
-        "requires_token": needs_setup && state.bootstrap_token.is_some(),
+        "requires_token": needs_setup && has_token,
     })))
 }
 
@@ -110,10 +116,21 @@ async fn setup(
     Json(payload): Json<SetupPayload>,
 ) -> Result<StatusCode, ApiError> {
     // FF-001: verify bootstrap token before anything else.
-    if let Some(expected) = &state.bootstrap_token {
-        match &payload.bootstrap_token {
-            Some(provided) if provided == expected => {}
-            _ => return Err(ApiError::Status(StatusCode::FORBIDDEN)),
+    // Constant-time comparison prevents timing side-channels on the token.
+    {
+        let guard = state
+            .bootstrap_token
+            .lock()
+            .expect("bootstrap_token mutex poisoned");
+        if let Some(expected) = guard.as_deref() {
+            let provided = payload
+                .bootstrap_token
+                .as_deref()
+                .unwrap_or("");
+            let ok = expected.as_bytes().ct_eq(provided.as_bytes()).into();
+            if !ok {
+                return Err(ApiError::Status(StatusCode::FORBIDDEN));
+            }
         }
     }
 
@@ -176,6 +193,9 @@ async fn setup(
     {
         return Err(ApiError::Status(StatusCode::CONFLICT));
     }
+
+    // FF-001 hardening: clear the token from memory after successful setup.
+    state.clear_bootstrap_token();
 
     session.insert(SESSION_AUTH_KEY, true).await?;
     Ok(StatusCode::OK)
