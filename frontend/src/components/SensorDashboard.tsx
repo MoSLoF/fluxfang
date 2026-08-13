@@ -56,11 +56,11 @@ export default function SensorDashboard() {
         </div>
         <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Cached</div>
-          <div className="text-2xl font-semibold text-slate-100">{s?.cache.total ?? 0}</div>
+          <div className="text-2xl font-semibold text-slate-100">{s?.cache?.total ?? 0}</div>
         </div>
         <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Undelivered</div>
-          <div className={`text-2xl font-semibold ${(s?.cache.undelivered ?? 0) > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>{s?.cache.undelivered ?? 0}</div>
+          <div className={`text-2xl font-semibold ${(s?.cache?.undelivered ?? 0) > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>{s?.cache?.undelivered ?? 0}</div>
         </div>
         <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Forwarding to</div>

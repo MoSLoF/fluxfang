@@ -56,6 +56,8 @@ pub struct SetupPayload {
     node_sensor_id: String,
     #[serde(default)]
     sensor: Option<SensorConfig>,
+    #[serde(default)]
+    bootstrap_token: Option<String>,
 }
 
 /// Slug rule for a node/sensor id: non-empty, ≤ 64 chars, `[A-Za-z0-9_-]`
@@ -83,7 +85,11 @@ pub fn protected_routes() -> Router<AppState> {
 
 async fn setup_status(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     let hash = AppConfigRepo::password_hash(&state.pool).await?;
-    Ok(Json(json!({ "needs_setup": hash.is_none() })))
+    let needs_setup = hash.is_none();
+    Ok(Json(json!({
+        "needs_setup": needs_setup,
+        "requires_token": needs_setup && state.bootstrap_token.is_some(),
+    })))
 }
 
 /// Set the admin password for the first (and only) time. Rejected with
@@ -91,11 +97,31 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<serde_json::
 /// only exists to bootstrap the very first admin credential, not to change
 /// it later (that's a separate, authenticated "change password" concern for
 /// a future task).
+///
+/// **FF-001**: When a bootstrap token is configured (always, in production),
+/// the caller must include it in the request body. This prevents a network
+/// neighbor from racing to claim admin on a fresh instance.
+///
+/// **FF-003**: A cheap DB check rejects immediately when setup is already
+/// done, before any Argon2 work. A semaphore caps concurrent hashing.
 async fn setup(
     State(state): State<AppState>,
     session: Session,
     Json(payload): Json<SetupPayload>,
 ) -> Result<StatusCode, ApiError> {
+    // FF-001: verify bootstrap token before anything else.
+    if let Some(expected) = &state.bootstrap_token {
+        match &payload.bootstrap_token {
+            Some(provided) if provided == expected => {}
+            _ => return Err(ApiError::Status(StatusCode::FORBIDDEN)),
+        }
+    }
+
+    // FF-003: cheap rejection — skip Argon2 when setup is already done.
+    if AppConfigRepo::password_hash(&state.pool).await?.is_some() {
+        return Err(ApiError::Status(StatusCode::CONFLICT));
+    }
+
     if payload.password.is_empty() || payload.password.len() > MAX_PASSWORD_BYTES {
         return Err(ApiError::Status(StatusCode::BAD_REQUEST));
     }
@@ -128,11 +154,20 @@ async fn setup(
         },
     };
 
+    // FF-003: cap concurrent Argon2 work across setup + login.
+    let _permit = state
+        .hash_semaphore
+        .acquire()
+        .await
+        .expect("hash semaphore should never be closed");
+
     // Argon2 hashing is CPU-heavy; run it off the async executor.
     let password = payload.password;
     let hash = tokio::task::spawn_blocking(move || hash_password(&password))
         .await
         .expect("hash_password blocking task panicked");
+
+    drop(_permit);
 
     // Atomic set-once: only the winner of a concurrent-setup race gets Some.
     if AppConfigRepo::complete_setup(&state.pool, &hash, &node)
@@ -161,12 +196,24 @@ async fn login(
 
     let stored_hash = AppConfigRepo::password_hash(&state.pool).await?;
 
+    if payload.password.len() > MAX_PASSWORD_BYTES {
+        state.login_limiter.record_failure();
+        return Err(ApiError::Status(StatusCode::UNAUTHORIZED));
+    }
+
     let verified = match stored_hash {
         Some(hash) => {
-            let candidate = payload.password;
-            tokio::task::spawn_blocking(move || verify_password(&hash, &candidate))
+            let _permit = state
+                .hash_semaphore
+                .acquire()
                 .await
-                .expect("verify_password blocking task panicked")
+                .expect("hash semaphore should never be closed");
+            let candidate = payload.password;
+            let result = tokio::task::spawn_blocking(move || verify_password(&hash, &candidate))
+                .await
+                .expect("verify_password blocking task panicked");
+            drop(_permit);
+            result
         }
         // No password configured yet (setup hasn't run) — nothing can
         // possibly verify against it.

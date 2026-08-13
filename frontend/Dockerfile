@@ -26,4 +26,19 @@ FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 8081
+# TLS is the default. When certs are bind-mounted into /etc/nginx/tls/,
+# nginx serves HTTPS on 8443 and redirects HTTP 8081 -> HTTPS. Without
+# certs (FLUXFANG_INSECURE_DEV mode), nginx must start without the TLS
+# block — the entrypoint script below handles this by stripping the ssl
+# server block when no cert is found.
+COPY <<'ENTRYPOINT' /docker-entrypoint.d/90-tls-check.sh
+#!/bin/sh
+if [ ! -f /etc/nginx/tls/cert.pem ] || [ ! -f /etc/nginx/tls/key.pem ]; then
+  echo "fluxfang: no TLS cert found at /etc/nginx/tls/ — running HTTP-only (insecure dev mode)"
+  # Remove the ssl server block so nginx doesn't fail on missing certs.
+  sed -i '/listen 8443 ssl/,/^}/d' /etc/nginx/conf.d/default.conf
+fi
+ENTRYPOINT
+RUN chmod +x /docker-entrypoint.d/90-tls-check.sh
+
+EXPOSE 8081 8443
