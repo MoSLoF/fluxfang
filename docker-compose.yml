@@ -123,9 +123,11 @@ services:
     # Same reasoning as backend: host networking lets nginx proxy /api and /ws
     # to the backend at 127.0.0.1:8080 without depending on Docker DNS.
     network_mode: host
+    environment:
+      FLUXFANG_INSECURE_DEV: ${FLUXFANG_INSECURE_DEV:-}
     # TLS certificate and key for HTTPS. Bind-mount your cert and key into
-    # /etc/nginx/tls/. Without these, the frontend runs HTTP-only (for
-    # FLUXFANG_INSECURE_DEV mode only — never in production).
+    # /etc/nginx/tls/. Without these, the frontend refuses to start unless
+    # FLUXFANG_INSECURE_DEV=true (local development only).
     volumes:
       - "${TLS_CERT_DIR:-./tls}:/etc/nginx/tls:ro"
     depends_on:

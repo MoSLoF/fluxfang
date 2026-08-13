@@ -31,7 +31,7 @@ export function jsonResponse(body: unknown, status = 200): Response {
  * hanging) on any pathname not registered, so an unexpected request fails
  * the test loudly instead of silently resolving `undefined`. */
 export function mockFetchRoutes(routes: Record<string, unknown | ((url: URL) => unknown)>) {
-  return vi.fn((input: RequestInfo | URL) => {
+  return vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
     const raw = typeof input === 'string' ? input : input.toString();
     const url = new URL(raw, 'http://localhost');
     const handler = routes[url.pathname];

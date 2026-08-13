@@ -210,7 +210,16 @@ async fn main() {
         });
     }
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let bind_addr = if std::env::var("FLUXFANG_INSECURE_DEV")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        "0.0.0.0:8080"
+    } else {
+        "127.0.0.1:8080"
+    };
+    eprintln!("fluxfang: binding API to {bind_addr}");
+    let listener = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
     axum::serve(
         listener,
         fluxfang_api::app(state).into_make_service_with_connect_info::<SocketAddr>(),

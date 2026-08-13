@@ -34,9 +34,14 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY <<'ENTRYPOINT' /docker-entrypoint.d/90-tls-check.sh
 #!/bin/sh
 if [ ! -f /etc/nginx/tls/cert.pem ] || [ ! -f /etc/nginx/tls/key.pem ]; then
-  echo "fluxfang: no TLS cert found at /etc/nginx/tls/ — running HTTP-only (insecure dev mode)"
-  # Remove the ssl server block so nginx doesn't fail on missing certs.
-  sed -i '/listen 8443 ssl/,/^}/d' /etc/nginx/conf.d/default.conf
+  if [ "$FLUXFANG_INSECURE_DEV" = "true" ] || [ "$FLUXFANG_INSECURE_DEV" = "1" ]; then
+    echo "fluxfang: no TLS cert found — running HTTP-only (FLUXFANG_INSECURE_DEV is set)"
+    sed -i '/listen 8443 ssl/,/^}/d' /etc/nginx/conf.d/default.conf
+  else
+    echo "fluxfang: FATAL — no TLS cert at /etc/nginx/tls/cert.pem"
+    echo "fluxfang: Place your cert+key there, or set FLUXFANG_INSECURE_DEV=true for local dev."
+    exit 1
+  fi
 fi
 ENTRYPOINT
 RUN chmod +x /docker-entrypoint.d/90-tls-check.sh
