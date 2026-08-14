@@ -21,8 +21,8 @@ drive the whole thing from a web UI.
 
 ```bash
 # 1. Clone the repo and move into it
-git clone https://github.com/reconhawklabs/FluxFang.git
-cd FluxFang
+git clone https://github.com/MoSLoF/fluxfang.git
+cd fluxfang
 
 # 2. Create your environment file from the template
 cp env.example .env
@@ -47,8 +47,13 @@ mkdir -p tls && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256
 
 Once the containers are up, open **`https://<host>:8443`**. The first-run
 setup page will ask for a **bootstrap token** — find it in the backend
-container logs (`docker compose logs backend | grep BOOTSTRAP`). Enter the
-token, choose your admin password, and select your node role.
+container logs:
+
+```bash
+docker compose logs backend | grep FLUXFANG_BOOTSTRAP_TOKEN=
+```
+
+Enter the token, choose your admin password, and select your node role.
 
 > **Local development without TLS:** set `FLUXFANG_INSECURE_DEV=true` in
 > `.env`. The frontend will serve HTTP on port 8081 and the backend will bind
