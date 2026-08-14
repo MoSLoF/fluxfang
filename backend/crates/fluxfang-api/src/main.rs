@@ -80,6 +80,7 @@ async fn main() {
             eprintln!("║  This token is single-use and will not be shown again.      ║");
             eprintln!("╚══════════════════════════════════════════════════════════════╝");
             eprintln!();
+            eprintln!("FLUXFANG_BOOTSTRAP_TOKEN={token}");
             state.set_bootstrap_token(token);
         }
     }
