@@ -31,12 +31,28 @@ cp env.example .env
 docker compose up -d --build
 ```
 
-Every value in `env.example` ships with a sane default and an inline comment
-explaining it. If you have no hardware yet, just leave the hardware settings
-(`WIFI_DEVICE`, `GPS_DEVICE`) unset.
+Edit `.env` and set real values for `POSTGRES_PASSWORD`, `FLUXFANG_SECRET_KEY`,
+and `DATABASE_URL` at minimum. If you have no hardware yet, just leave the
+hardware settings (`WIFI_DEVICE`, `GPS_DEVICE`) unset. See `env.example` for
+inline docs on every variable.
 
-Once the containers are up, open **`http://<host>:8081`**, complete the
-first-run setup, and choose your admin password.
+**TLS is required by default.** Place your certificate and key in a `tls/`
+directory (or wherever `TLS_CERT_DIR` points):
+
+```bash
+# Self-signed cert for development / homelab:
+mkdir -p tls && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+  -keyout tls/key.pem -out tls/cert.pem -days 365 -nodes -subj '/CN=fluxfang'
+```
+
+Once the containers are up, open **`https://<host>:8443`**. The first-run
+setup page will ask for a **bootstrap token** — find it in the backend
+container logs (`docker compose logs backend | grep BOOTSTRAP`). Enter the
+token, choose your admin password, and select your node role.
+
+> **Local development without TLS:** set `FLUXFANG_INSECURE_DEV=true` in
+> `.env`. The frontend will serve HTTP on port 8081 and the backend will bind
+> to all interfaces. Never use this on an untrusted network.
 
 ## Managing the stack
 
@@ -157,7 +173,8 @@ AI Audit Log is the only record of what changed. There is no undo.
 ## Running on Windows (WSL2)
 
 The web stack runs fine under WSL2 (Ubuntu): install Docker and follow the Quick
-start above, then open `http://localhost:8081` from Windows.
+start above, then open `https://localhost:8443` from Windows (or
+`http://localhost:8081` if you set `FLUXFANG_INSECURE_DEV=true`).
 
 RF capture is the catch. WSL2 doesn't expose your PC's built-in radios to Linux.
 USB devices (RTL-SDR, USB-serial GPS) can be passed through with
