@@ -99,6 +99,22 @@ pub enum BuiltCapture {
     Wifi(Box<dyn Capturer>),
     Location(Box<dyn LocationSource>),
     Bluetooth(Box<dyn Capturer>),
+    /// A push (`kind='external'`) source: no in-process capturer. Observations
+    /// arrive over HTTP and are fed in by [`CaptureSupervisor::ingest_external`]
+    /// (the `POST /api/data-sources/:id/ingest` route). Used by the RF agent
+    /// bridge. Goes through [`CaptureSupervisor::start_push`], which reuses the
+    /// same `ensure_session` + reader→`ingest` loop as the hardware capturers.
+    Push,
+}
+
+/// Why a [`CaptureSupervisor::ingest_external`] call could not be delivered.
+#[derive(Debug)]
+pub enum IngestPushError {
+    /// No push source with this id is currently running (its `/start` hasn't
+    /// been called, or it was stopped) — nothing to feed.
+    NotRunning,
+    /// The source's ingest channel is closed (its reader task has ended).
+    Closed,
 }
 
 /// Builds the capture backend for a `data_source` row. The seam that lets
@@ -219,6 +235,9 @@ impl CapturerFactory for RealCapturerFactory {
                     fluxfang_capture::rtl::TpmsCapturer::new(frequency, device_serial),
                 )))
             }
+            // No hardware to build: a push source is driven entirely by the
+            // HTTP ingest route via `CaptureSupervisor::ingest_external`.
+            "external" => Ok(BuiltCapture::Push),
             other => Err(anyhow!("unsupported data source kind '{other}'")),
         }
     }
@@ -526,6 +545,17 @@ pub(crate) fn validate_data_source(
                 _ => Err("bluetooth data sources require a non-empty interface".to_string()),
             }
         }
+        "external" => {
+            // A push source has no hardware and no interface; the only rule is
+            // the mode. `config.auto_create_emitters` (optional) is read at
+            // ingest time by the existing auto-create path, like other kinds.
+            if mode != "push" {
+                return Err(format!(
+                    "external data sources must use mode 'push', got '{mode}'"
+                ));
+            }
+            Ok(())
+        }
         "rtl_sdr" => {
             if mode != "tpms" {
                 return Err(format!(
@@ -602,6 +632,13 @@ enum RunningHandle {
     Location {
         pump: LocationPump,
     },
+    /// A push (`kind='external'`) source. No capturer object — the sender that
+    /// feeds it lives in `CaptureSupervisor::push`; here we only keep the
+    /// reader task (draining the channel into `ingest`) and its stop flag.
+    Push {
+        reader: JoinHandle<()>,
+        stopping: Arc<std::sync::atomic::AtomicBool>,
+    },
 }
 
 /// The orchestrator: turns `data_source` rows on and off. See module docs
@@ -624,6 +661,12 @@ pub struct CaptureSupervisor {
     /// endpoint.
     provider: Arc<LocationProvider>,
     session: Mutex<Option<Arc<SessionManager>>>,
+    /// Sender half of each running push (`kind='external'`) source's ingest
+    /// channel, keyed by `data_source_id`. [`Self::ingest_external`] looks a
+    /// sender up here; [`Self::start_push`] inserts one; [`Self::stop`] removes
+    /// it (dropping it closes the channel so the reader task ends). Guarded
+    /// independently of `running` — the HTTP ingest route only touches this.
+    push: Mutex<HashMap<Uuid, mpsc::Sender<RawObservation>>>,
     /// Guards both the running-set map itself *and* serializes
     /// `start`/`stop` end-to-end (the lock is held for a whole call, not
     /// just the map mutation) — deliberately coarse-grained: this is a
@@ -665,6 +708,7 @@ impl CaptureSupervisor {
             factory,
             provider: Arc::new(LocationProvider::new()),
             session: Mutex::new(None),
+            push: Mutex::new(HashMap::new()),
             running: Mutex::new(HashMap::new()),
             failure_tx,
             failure_rx: StdMutex::new(Some(failure_rx)),
@@ -902,6 +946,62 @@ impl CaptureSupervisor {
         Ok(RunningHandle::Location { pump })
     }
 
+    /// Start a push (`kind='external'`) source. There is no hardware capturer:
+    /// we register an ingest channel whose sender the HTTP ingest route
+    /// ([`Self::ingest_external`]) feeds, and spawn the *same* reader→`ingest`
+    /// loop the hardware capturers use (via `start_wifi`). Pushed observations
+    /// therefore get identical treatment — session bounding (`ensure_session`),
+    /// auto-attach / auto-create, GPS geolocation from the active session, and
+    /// alert/zone evaluation — as anything captured locally.
+    async fn start_push(&self, data_source_id: Uuid) -> anyhow::Result<RunningHandle> {
+        let (ctx, _session) = self.ensure_session().await?;
+        let (tx, mut rx) = mpsc::channel::<RawObservation>(256);
+        // Register the sender so `ingest_external` can find it. This map entry
+        // is what keeps `rx` open; `stop` removes it to end the reader.
+        self.push.lock().await.insert(data_source_id, tx);
+
+        let stopping = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping_reader = stopping.clone();
+        let failure_tx = self.failure_tx.clone();
+        let reader = tokio::spawn(async move {
+            while let Some(obs) = rx.recv().await {
+                if let Err(err) = ingest(&ctx, data_source_id, obs).await {
+                    // Same policy as the hardware reader loop: one failed
+                    // ingest must not kill the task — log and keep draining.
+                    eprintln!(
+                        "CaptureSupervisor: ingest failed for push data source {data_source_id}: {err:#}"
+                    );
+                }
+            }
+            // Channel closed. Unlike a hardware capturer, a push source dying
+            // isn't a device failure — the only way `rx` closes is `stop`
+            // removing the sender (a deliberate stop). Report failure only if
+            // that wasn't us, for symmetry with the other reader loops.
+            if !stopping_reader.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = failure_tx.send(data_source_id);
+            }
+        });
+
+        Ok(RunningHandle::Push { reader, stopping })
+    }
+
+    /// Feed one observation into a running push (`kind='external'`) source's
+    /// ingest pipeline. The `POST /api/data-sources/:id/ingest` route is the
+    /// only caller. Errors ([`IngestPushError`]) if the source isn't running or
+    /// its reader has gone away — never blocks start/stop (the sender is cloned
+    /// out from under the lock before the `send().await`).
+    pub async fn ingest_external(
+        &self,
+        data_source_id: Uuid,
+        obs: RawObservation,
+    ) -> Result<(), IngestPushError> {
+        let sender = { self.push.lock().await.get(&data_source_id).cloned() };
+        match sender {
+            Some(tx) => tx.send(obs).await.map_err(|_| IngestPushError::Closed),
+            None => Err(IngestPushError::NotRunning),
+        }
+    }
+
     /// Start capturing from `data_source_id`.
     ///
     /// No-op (`Ok(())`, nothing touched) if it's already running -- a
@@ -968,6 +1068,7 @@ impl CaptureSupervisor {
             BuiltCapture::Wifi(capturer) => self.start_wifi(data_source_id, capturer).await,
             BuiltCapture::Bluetooth(capturer) => self.start_wifi(data_source_id, capturer).await,
             BuiltCapture::Location(source) => self.start_location(data_source_id, source).await,
+            BuiltCapture::Push => self.start_push(data_source_id).await,
         };
 
         let handle = match handle {
@@ -1153,6 +1254,14 @@ impl CaptureSupervisor {
                 // User-initiated stop clears the provider so emissions read
                 // `none` immediately (a failure would leave it `stale`).
                 self.provider.clear();
+            }
+            RunningHandle::Push { reader, stopping } => {
+                // Mark the stop deliberate, then drop this source's sender so
+                // the reader's channel closes and it ends once the last
+                // in-flight observation has been ingested.
+                stopping.store(true, std::sync::atomic::Ordering::SeqCst);
+                self.push.lock().await.remove(&data_source_id);
+                let _ = reader.await;
             }
         }
 
