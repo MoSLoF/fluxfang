@@ -284,6 +284,7 @@ pub fn classify(kind: &str, payload: &Value) -> Option<Classification> {
         "wifi" => classify_wifi(payload),
         "bluetooth" => classify_bluetooth(payload),
         "tpms" => classify_tpms(payload),
+        "subghz" => classify_subghz(payload),
         _ => None,
     }
 }
@@ -558,6 +559,35 @@ fn classify_tpms(payload: &Value) -> Option<Classification> {
     })
 }
 
+/// A sub-GHz decode with a stable decoded id/serial → `subghz_device`,
+/// identified by `id` (e.g. a fixed-code keyfob, garage/gate remote, weather
+/// station, or sensor). Uses the default single-condition rule (`id == <id>`),
+/// so a later packet from the same device auto-attaches. Decodes with no stable
+/// `id` (rolling-code remotes, raw OOK) return `None` and stay stray for manual
+/// grouping — same policy as an unrecognized payload.
+fn classify_subghz(payload: &Value) -> Option<Classification> {
+    let id = non_empty_str(payload, "id")?;
+    let protocol = payload.get("protocol").and_then(Value::as_str);
+    Some(Classification {
+        emitter_type: "subghz_device".to_string(),
+        category: "subghz".to_string(),
+        identity_field: "id".to_string(),
+        identity_value: id.clone(),
+        name: match protocol {
+            Some(p) => format!("Sub-GHz {p} {id}"),
+            None => format!("Sub-GHz {id}"),
+        },
+        attributes: serde_json::json!({
+            "id": id,
+            "protocol": protocol,
+        }),
+        match_criteria: None,
+        // A decoded id/serial isn't a MAC and isn't randomized; `None` exempts
+        // it from the persistence filters and the retention gate, like TPMS.
+        persistence: None,
+    })
+}
+
 /// Human-readable label for an emitter type key, for UI display (e.g. the
 /// Emitters page's `type_label`). The return type is `&'static str`, so an
 /// unrecognized key can't be passed through by reference — it maps to the
@@ -568,6 +598,7 @@ pub fn emitter_type_label(type_key: &str) -> &'static str {
         "wifi_client" => "WiFi Client",
         "bluetooth_device" => "Bluetooth Device",
         "tpms_sensor" => "TPMS Sensor",
+        "subghz_device" => "Sub-GHz Device",
         _ => "Unknown",
     }
 }
@@ -579,6 +610,7 @@ pub fn emitter_category(type_key: &str) -> &'static str {
         "wifi_access_point" | "wifi_client" => "wifi",
         "bluetooth_device" => "bluetooth",
         "tpms_sensor" => "tpms",
+        "subghz_device" => "subghz",
         _ => "other",
     }
 }
@@ -592,6 +624,7 @@ pub fn catalog_kind_for(emitter_type: Option<&str>) -> &'static str {
     match emitter_type.map(emitter_category) {
         Some("bluetooth") => "bluetooth",
         Some("tpms") => "tpms",
+        Some("subghz") => "subghz",
         _ => "wifi",
     }
 }
@@ -638,6 +671,10 @@ pub fn emitter_types_for_kind(kind: &str) -> Vec<EmitterTypeInfo> {
             key: "tpms_sensor",
             label: "TPMS Sensor",
         }],
+        "subghz" => vec![EmitterTypeInfo {
+            key: "subghz_device",
+            label: "Sub-GHz Device",
+        }],
         _ => Vec::new(),
     }
 }
@@ -649,7 +686,7 @@ pub fn emitter_types_for_kind(kind: &str) -> Vec<EmitterTypeInfo> {
 pub fn is_known_emitter_type(type_key: &str) -> bool {
     matches!(
         type_key,
-        "wifi_access_point" | "wifi_client" | "bluetooth_device" | "tpms_sensor"
+        "wifi_access_point" | "wifi_client" | "bluetooth_device" | "tpms_sensor" | "subghz_device"
     )
 }
 

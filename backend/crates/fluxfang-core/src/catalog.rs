@@ -172,6 +172,10 @@ pub fn emitter_attribute_catalog(emitter_type: &str) -> Vec<FieldDef> {
             field("sensor_id", "Sensor ID", FieldType::Text),
             field("model", "Model", FieldType::Text),
         ],
+        "subghz_device" => vec![
+            field("id", "Device ID / serial", FieldType::Text),
+            field("protocol", "Protocol", FieldType::Text),
+        ],
         _ => Vec::new(),
     }
 }
