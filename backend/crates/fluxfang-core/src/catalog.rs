@@ -99,6 +99,17 @@ fn tpms_catalog() -> Vec<FieldDef> {
     ]
 }
 
+fn subghz_catalog() -> Vec<FieldDef> {
+    vec![
+        field("id", "Device ID / serial", FieldType::Text),
+        field("protocol", "Protocol", FieldType::Text),
+        field("key", "Raw key / code", FieldType::Text),
+        field("frequency", "Frequency (Hz)", FieldType::Number),
+        field("bits", "Bit length", FieldType::Number),
+        field("signal_strength", "Signal strength", FieldType::Number),
+    ]
+}
+
 /// Return the field catalog for a data source `kind` (e.g. `"wifi"`).
 /// Unknown kinds return an empty catalog.
 pub fn catalog_for(kind: &str) -> Vec<FieldDef> {
@@ -106,6 +117,7 @@ pub fn catalog_for(kind: &str) -> Vec<FieldDef> {
         "wifi" => wifi_catalog(),
         "bluetooth" => bluetooth_catalog(),
         "tpms" => tpms_catalog(),
+        "subghz" => subghz_catalog(),
         _ => Vec::new(),
     }
 }
