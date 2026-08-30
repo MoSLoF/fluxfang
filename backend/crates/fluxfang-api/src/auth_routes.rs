@@ -127,7 +127,7 @@ async fn setup(
                 .bootstrap_token
                 .as_deref()
                 .unwrap_or("");
-            let ok = expected.as_bytes().ct_eq(provided.as_bytes()).into();
+            let ok: bool = expected.as_bytes().ct_eq(provided.as_bytes()).into();
             if !ok {
                 return Err(ApiError::Status(StatusCode::FORBIDDEN));
             }
