@@ -51,13 +51,14 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use fluxfang_capture::RawObservation;
 use fluxfang_db::models::{DataSource, NewDataSource};
 use fluxfang_db::DataSourceRepo;
 
-use crate::capture::validate_data_source;
+use crate::capture::{validate_data_source, IngestPushError};
 use crate::state::AppState;
 
 pub fn protected_routes() -> Router<AppState> {
@@ -75,6 +76,7 @@ pub fn protected_routes() -> Router<AppState> {
         .route("/api/data-sources/:id/start", post(start_data_source))
         .route("/api/data-sources/:id/stop", post(stop_data_source))
         .route("/api/data-sources/:id/allow-sensors", post(allow_sensors))
+        .route("/api/data-sources/:id/ingest", post(ingest_data_source))
 }
 
 #[derive(Debug, Deserialize)]
@@ -270,11 +272,72 @@ async fn allow_sensors(
     Ok(Json(serde_json::json!({ "remaining_secs": remaining })))
 }
 
+/// Body of `POST /api/data-sources/:id/ingest`: either a single observation
+/// or a `{ "observations": [ ... ] }` batch. Each observation is a
+/// `fluxfang_capture::RawObservation` (`kind`, `observed_at` (RFC3339),
+/// optional `signal_strength`, `payload`). Location is NOT part of it — the
+/// active session's GPS trajectory geolocates each emission at ingest.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum IngestBody {
+    Batch { observations: Vec<RawObservation> },
+    Single(RawObservation),
+}
+
+#[derive(Debug, Serialize)]
+struct IngestResult {
+    accepted: usize,
+}
+
+/// `POST /api/data-sources/:id/ingest` — push external observations (from the
+/// RF agent bridge) into a running `kind='external'` source. The source must
+/// exist, be of kind `external`, and be started (`/start`) first. Each
+/// observation flows through the normal `ingest()` pipeline (auto-attach /
+/// auto-create emitter, GPS geolocation, alerts, zones), exactly like a
+/// locally-captured one.
+async fn ingest_data_source(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<IngestBody>,
+) -> Result<Json<IngestResult>, ApiError> {
+    let source = DataSourceRepo::get(&state.pool, id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    if source.kind != "external" {
+        return Err(ApiError::BadRequest(format!(
+            "data source {id} is kind '{}', not 'external'; only external/push sources accept ingest",
+            source.kind
+        )));
+    }
+
+    let observations = match body {
+        IngestBody::Batch { observations } => observations,
+        IngestBody::Single(obs) => vec![obs],
+    };
+
+    let mut accepted = 0usize;
+    for obs in observations {
+        match state.capture.ingest_external(id, obs).await {
+            Ok(()) => accepted += 1,
+            Err(IngestPushError::NotRunning) => {
+                return Err(ApiError::Conflict(format!(
+                    "data source {id} is not running; start it (/start) before pushing observations"
+                )));
+            }
+            // Reader task gone despite the source being registered — treat as
+            // an internal fault rather than silently dropping data.
+            Err(IngestPushError::Closed) => return Err(ApiError::Internal),
+        }
+    }
+    Ok(Json(IngestResult { accepted }))
+}
+
 /// Small internal error type, same convention as `auth_routes::ApiError`:
 /// DB failures map to `500`; deliberate rejections carry their own status.
 enum ApiError {
     BadRequest(String),
     NotFound,
+    Conflict(String),
     Internal,
 }
 
@@ -290,6 +353,7 @@ impl IntoResponse for ApiError {
         match self {
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
             ApiError::NotFound => StatusCode::NOT_FOUND.into_response(),
+            ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg).into_response(),
             ApiError::Internal => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
     }
