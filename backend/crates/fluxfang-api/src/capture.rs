@@ -965,7 +965,18 @@ impl CaptureSupervisor {
         let failure_tx = self.failure_tx.clone();
         let reader = tokio::spawn(async move {
             while let Some(obs) = rx.recv().await {
-                if let Err(err) = ingest(&ctx, data_source_id, obs).await {
+                // Mirror the hardware reader loop exactly (start_wifi): honor
+                // sensor-mode caching, otherwise the retention-gated ingest.
+                let result = if ctx.sensor_mode.get() {
+                    crate::ingest::cache_observation(&ctx, data_source_id, obs)
+                        .await
+                        .map(|_| ())
+                } else {
+                    crate::ingest::ingest_if_retained(&ctx, data_source_id, obs)
+                        .await
+                        .map(|_| ())
+                };
+                if let Err(err) = result {
                     // Same policy as the hardware reader loop: one failed
                     // ingest must not kill the task — log and keep draining.
                     eprintln!(
