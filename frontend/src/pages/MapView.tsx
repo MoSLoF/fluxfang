@@ -171,12 +171,17 @@ interface LayerVisibility {
   zones: boolean;
   entities: boolean;
   emitters: boolean;
+  heatmap: boolean;
 }
 
 const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
   zones: true,
   entities: true,
   emitters: true,
+  // Heatmap (up to MAX_POINTS=50k emission points) is opt-in: the default map
+  // renders estimate-based emitter markers only, so it loads fast. Toggle on to
+  // overlay emission density.
+  heatmap: false,
 };
 
 /** Shared `GET /api/emissions`(`/points`) params — time-range scoping plus an
@@ -201,6 +206,16 @@ function buildEmissionsParams(opts: {
   if (opts.timeTo.length > 0)
     params.set("time_to", new Date(opts.timeTo).toISOString());
   return params;
+}
+
+/** Map page default "From" bound: the last 24h (the visual/activity window,
+ * matching the emitter last_seen tier). Standalone Map page only -- the
+ * Dashboard still drives the window via the `timeFrom` prop, which overrides
+ * this. `datetime-local` format (local time, no seconds). */
+function defaultMapTimeFrom(): string {
+  const d = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** HTML-escape a value bound for a MapLibre popup's `setHTML` (emitter
@@ -488,7 +503,7 @@ export default function MapView({
   // converted to RFC3339 `time_from`/`time_to` params by
   // `buildEmissionsParams`. Clearing either removes that bound. Overridden by
   // the `timeFrom`/`timeTo` props when the Dashboard drives the window.
-  const [timeFromState, setTimeFrom] = useState("");
+  const [timeFromState, setTimeFrom] = useState(defaultMapTimeFrom);
   const [timeToState, setTimeTo] = useState("");
   const timeFrom = timeFromProp ?? timeFromState;
   const timeTo = timeToProp ?? timeToState;
@@ -560,6 +575,7 @@ export default function MapView({
       return {
         queryKey: [...queryKeys.emissions, "map-points", params.toString()],
         queryFn: () => listEmissionPoints(params),
+        enabled: layerVisibility.heatmap,
       };
     }),
   });
@@ -896,7 +912,7 @@ export default function MapView({
     // The emissions heatmap is always shown now — the Sources group is the
     // sole emission filter (the old "Emissions" category-toggle group was
     // removed as redundant with it).
-    apply(HEATMAP_LAYER_IDS, true);
+    apply(HEATMAP_LAYER_IDS, layerVisibility.heatmap);
     apply(ENTITY_LAYER_IDS, layerVisibility.entities);
     apply(
       [...EMITTER_LAYER_IDS, ...EMITTER_UNCERTAINTY_LAYER_IDS],
@@ -1017,6 +1033,15 @@ export default function MapView({
                   className={checkboxInputClassName}
                 />
                 Emitters
+              </label>
+              <label className={checkboxLabelClassName}>
+                <input
+                  type="checkbox"
+                  checked={layerVisibility.heatmap}
+                  onChange={() => toggleLayer("heatmap")}
+                  className={checkboxInputClassName}
+                />
+                Heatmap
               </label>
             </div>
           </fieldset>
