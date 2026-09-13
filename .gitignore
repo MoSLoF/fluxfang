@@ -9,3 +9,8 @@ temp/
 .claude/worktrees/
 .superpowers/
 docs/superpowers/
+
+# Operational tooling — owned by the iHBV-FluxFang device repo (device/tools/), not the app repo
+/tools/
+# Local Claude MCP config (per-machine)
+/.mcp.json
