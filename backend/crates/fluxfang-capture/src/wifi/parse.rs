@@ -315,7 +315,13 @@ fn parse_ssid_tag(dot11: &[u8], start: usize) -> Option<String> {
             break;
         }
         if tag_id == TAG_SSID {
-            return Some(String::from_utf8_lossy(&dot11[value_start..value_end]).into_owned());
+            // Cloaked/hidden APs pad the SSID field with NUL bytes (0x00). NUL is
+            // valid UTF-8, so `from_utf8_lossy` preserves it, but PostgreSQL `jsonb`
+            // rejects a NUL escape ("unsupported Unicode escape sequence"), which fails
+            // the entire emission batch on insert. Strip NULs here so an all-NUL
+            // cloaked SSID normalizes to the empty ("") hidden-SSID case.
+            let ssid = String::from_utf8_lossy(&dot11[value_start..value_end]);
+            return Some(ssid.replace('\0', ""));
         }
         idx = value_end;
     }
@@ -362,6 +368,28 @@ pub fn parse_beacon_security(dot11: &[u8]) -> Option<WifiSecurity> {
 #[cfg(test)]
 mod security_tests {
     use super::*;
+
+    #[test]
+    fn cloaked_ssid_nul_bytes_are_stripped() {
+        // A hidden AP whose SSID tag (id 0) is padded with NUL bytes. NUL is
+        // valid UTF-8 but PostgreSQL jsonb rejects it, which previously failed
+        // the whole emission batch on insert. parse_ssid_tag must strip NULs so
+        // an all-NUL cloaked SSID normalizes to "" and serializes cleanly.
+        let frame = [TAG_SSID, 4, 0x00, 0x00, 0x00, 0x00];
+        let ssid = parse_ssid_tag(&frame, 0).expect("ssid tag is present");
+        assert!(!ssid.contains('\0'), "NUL must be stripped from the SSID");
+        assert_eq!(ssid, "");
+        // A partially-NUL SSID keeps its printable bytes, drops only the NULs.
+        let frame2 = [TAG_SSID, 5, b'A', 0x00, b'P', 0x00, b'!'];
+        let ssid2 = parse_ssid_tag(&frame2, 0).expect("ssid tag is present");
+        assert_eq!(ssid2, "AP!");
+        // The stripped value serializes to JSON with no \\u0000 escape, so the
+        // jsonb insert that broke before now succeeds.
+        let payload = serde_json::json!({ "ssid": ssid2 });
+        assert!(!serde_json::to_string(&payload)
+            .unwrap()
+            .contains("\\u0000"));
+    }
 
     // A minimal beacon dot11 frame: 24-byte MAC header (all zero except
     // frame-control byte 0 = 0x80), 12-byte fixed body with capability info
